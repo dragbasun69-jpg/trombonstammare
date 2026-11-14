@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#111418">
-<title>Trombonstämmare</title>
+<title>Stämmare</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Stämmare">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <style>
@@ -49,6 +54,12 @@
   .seg{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
   .seg button{border:none;border-radius:0;padding:10px 14px;background:transparent;color:var(--muted)}
   .seg button.sel{background:var(--accent);color:#06121f;font-weight:700}
+  .strings{display:none;justify-content:center;gap:8px;margin:14px 0 0}
+  .strings.show{display:flex}
+  .str{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    background:var(--panel);border:1px solid var(--line);color:var(--muted);font-weight:700;font-size:1.1rem}
+  .str.cur{border-color:var(--accent);color:var(--text);background:#20344a}
+  .str.cur.in{border-color:var(--ok);background:#173a28;color:var(--ok)}
   .msg{color:var(--warn);text-align:center;min-height:1.2em;margin-top:10px}
 
   /* Metronom */
@@ -77,6 +88,7 @@
       <div class="note" id="note">–</div>
       <div class="hz" id="hz">Tryck på Starta och spela en ton</div>
     </div>
+    <div class="strings" id="strings"></div>
     <div class="meter" id="meter">
       <div class="zone"></div>
       <div class="needle" id="needle"></div>
@@ -88,6 +100,13 @@
 
     <div class="settings">
       <div class="row">
+        <label>Instrument</label>
+        <div class="seg" id="instSeg">
+          <button data-v="chrom">Kromatisk</button>
+          <button data-v="guitar">Gitarr</button>
+        </div>
+      </div>
+      <div class="row">
         <label>Stämton A</label>
         <div class="stepper">
           <button id="aDown" aria-label="Sänk stämton">−</button>
@@ -95,7 +114,7 @@
           <button id="aUp" aria-label="Höj stämton">+</button>
         </div>
       </div>
-      <div class="row">
+      <div class="row" id="transRow">
         <label>Visning</label>
         <div class="seg" id="transSeg">
           <button data-v="0">Klingande C</button>
@@ -159,8 +178,19 @@ const S = {
   names: store.get("names", "sv"),
   bpm: store.get("bpm", 100),
   beats: store.get("beats", 4),
-  accent: store.get("accent", true)
+  accent: store.get("accent", true),
+  inst: store.get("inst", "chrom")
 };
+const GUITAR = [40, 45, 50, 55, 59, 64]; // E2 A2 D3 G3 H3 E4
+
+// iPhone: styr ljudsessionen så att metronomen hörs även på ljudlöst läge
+function setAudioSession(){
+  try{
+    if(navigator.audioSession){
+      navigator.audioSession.type = tunerOn ? "play-and-record" : metroOn ? "playback" : "auto";
+    }
+  }catch(e){}
+}
 const $ = id => document.getElementById(id);
 
 let ctx = null;
@@ -251,10 +281,15 @@ function median(arr){ const s = [...arr].sort((a,b) => a-b); return s[s.length >
 
 function showPitch(freq){
   const midiExact = 69 + 12 * Math.log2(freq / S.aRef);
-  const midi = Math.round(midiExact);
+  let midi = Math.round(midiExact), strIdx = -1;
+  if(S.inst === "guitar"){
+    strIdx = 0;
+    GUITAR.forEach((m, i) => { if(Math.abs(midiExact - m) < Math.abs(midiExact - GUITAR[strIdx])) strIdx = i; });
+    midi = GUITAR[strIdx];
+  }
   const cents = (midiExact - midi) * 100;
   centsSmooth = Math.abs(cents - centsSmooth) > 30 ? cents : centsSmooth * 0.6 + cents * 0.4;
-  const shown = midi + S.trans;
+  const shown = midi + (S.inst === "guitar" ? 0 : S.trans);
   const name = NAMES[S.names][((shown % 12) + 12) % 12];
   const oct = Math.floor(shown / 12) - 1;
   const cls = Math.abs(centsSmooth) <= 5 ? "ok" : Math.abs(centsSmooth) <= 15 ? "warn" : "bad";
@@ -270,6 +305,7 @@ function showPitch(freq){
   const c = Math.round(centsSmooth);
   const centsEl = $("cents");
   centsEl.className = "cents " + cls;
+  markString(strIdx, cls === "ok");
   centsEl.textContent = cls === "ok" ? "✓ Rent  " + (c > 0 ? "+" : c < 0 ? "−" : "±") + Math.abs(c)
     : (c < 0 ? "↑ För lågt  −" + Math.abs(c) + " cent" : "↓ För högt  +" + c + " cent");
 }
@@ -279,6 +315,25 @@ function clearPitch(){
   $("hz").textContent = tunerOn ? "Lyssnar …" : "Tryck på Starta och spela en ton";
   $("cents").innerHTML = "&nbsp;"; $("cents").className = "cents";
   $("needle").style.left = "50%"; $("needle").style.background = "var(--muted)";
+  markString(-1, false);
+}
+function renderStrings(){
+  const el = $("strings");
+  el.innerHTML = "";
+  GUITAR.forEach(m => {
+    const d = document.createElement("div");
+    d.className = "str";
+    d.textContent = NAMES[S.names][m % 12];
+    el.appendChild(d);
+  });
+  el.classList.toggle("show", S.inst === "guitar");
+  $("transRow").style.display = S.inst === "guitar" ? "none" : "";
+}
+function markString(i, inTune){
+  [...$("strings").children].forEach((d, k) => {
+    d.classList.toggle("cur", k === i);
+    d.classList.toggle("in", k === i && inTune);
+  });
 }
 
 function tunerLoop(now){
@@ -305,14 +360,17 @@ async function startTuner(){
     $("tunerMsg").textContent = "Mikrofonen kräver att appen öppnas via https.";
     return;
   }
+  const ac = audio();
+  tunerOn = true; setAudioSession(); tunerOn = false;
   try{
     stream = await navigator.mediaDevices.getUserMedia({ audio: {
       echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
   }catch(e){
-    $("tunerMsg").textContent = "Fick inte tillgång till mikrofonen. Tillåt mikrofon för sidan i Chrome.";
+    $("tunerMsg").textContent = "Fick inte tillgång till mikrofonen. Tillåt mikrofon för sidan i webbläsarens inställningar.";
+    setAudioSession();
     return;
   }
-  const ac = audio();
+  if(ac.state === "suspended") ac.resume();
   srcNode = ac.createMediaStreamSource(stream);
   analyser = ac.createAnalyser();
   analyser.fftSize = 8192;
@@ -320,7 +378,7 @@ async function startTuner(){
   srcNode.connect(analyser);
   tunerOn = true; history = [];
   $("tunerBtn").textContent = "Stoppa"; $("tunerBtn").classList.add("on");
-  clearPitch(); updateWakeLock();
+  clearPitch(); updateWakeLock(); setAudioSession();
   requestAnimationFrame(tunerLoop);
 }
 function stopTuner(){
@@ -329,7 +387,7 @@ function stopTuner(){
   if(stream) stream.getTracks().forEach(t => t.stop());
   stream = null; srcNode = null;
   $("tunerBtn").textContent = "Starta"; $("tunerBtn").classList.remove("on");
-  clearPitch(); updateWakeLock();
+  clearPitch(); updateWakeLock(); setAudioSession();
 }
 $("tunerBtn").addEventListener("click", () => tunerOn ? stopTuner() : startTuner());
 
@@ -338,7 +396,9 @@ $("aDown").addEventListener("click", () => { S.aRef = Math.max(415, S.aRef - 1);
 $("aUp").addEventListener("click", () => { S.aRef = Math.min(466, S.aRef + 1); renderA(); });
 renderA();
 segment($("transSeg"), S.trans, v => { S.trans = +v; store.set("trans", S.trans); });
-segment($("namesSeg"), S.names, v => { S.names = v; store.set("names", v); });
+segment($("namesSeg"), S.names, v => { S.names = v; store.set("names", v); renderStrings(); });
+segment($("instSeg"), S.inst, v => { S.inst = v; store.set("inst", v); history = []; renderStrings(); clearPitch(); });
+renderStrings();
 
 /* =========================================================
    METRONOM
@@ -416,6 +476,7 @@ function startMetro(){
   const ac = audio();
   if(!master){ master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination); }
   metroOn = true; beatIdx = 0; visQueue = []; lastLit = -1;
+  setAudioSession();
   nextTime = ac.currentTime + 0.08;
   timer.postMessage("start");
   scheduler();
@@ -428,7 +489,7 @@ function stopMetro(){
   timer.postMessage("stop");
   [...$("dots").children].forEach(d => d.classList.remove("lit"));
   $("metroBtn").textContent = "Starta"; $("metroBtn").classList.remove("on");
-  updateWakeLock();
+  updateWakeLock(); setAudioSession();
 }
 $("metroBtn").addEventListener("click", () => metroOn ? stopMetro() : startMetro());
 renderBpm(); renderBeats();
