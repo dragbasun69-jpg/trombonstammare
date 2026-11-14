@@ -62,6 +62,7 @@
     background:var(--panel);border:1px solid var(--line);color:var(--muted);font-weight:700;font-size:1.1rem}
   .str.cur{border-color:var(--accent);color:var(--text);background:#20344a}
   .str.cur.in{border-color:var(--ok);background:#173a28;color:var(--ok)}
+  select{font:inherit;font-size:1rem;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;max-width:62%}
   .msg{color:var(--warn);text-align:center;min-height:1.2em;margin-top:10px}
 
   /* Metronom */
@@ -120,6 +121,15 @@
           <output id="aVal">440 Hz</output>
           <button id="aUp" aria-label="Höj stämton">+</button>
         </div>
+      </div>
+      <div class="row" id="valveRow">
+        <label for="valveSel">Ventiler</label>
+        <select id="valveSel">
+          <option value="none">Ingen (tenortrombon)</option>
+          <option value="f">F</option>
+          <option value="fgbd">F + G♭ (båda = D)</option>
+          <option value="fgbe">F + G♭ (båda = E♭)</option>
+        </select>
       </div>
       <div class="row">
         <label>Klav</label>
@@ -196,6 +206,7 @@ const S = {
   accent: store.get("accent", true),
   inst: store.get("inst", "trombone")
 };
+S.valves = store.get("valves", "fgbd");
 S.clef = store.get("clef", S.inst === "guitar" ? "treble" : "bass");
 const GUITAR = [40, 45, 50, 55, 59, 64]; // E2 A2 D3 G3 H3 E4
 
@@ -373,18 +384,40 @@ function drawNote(writtenMidi, color){
   }
 }
 
-// Dragpositioner för B♭-trombon (klingande ton). Naturtonserien på B♭ och på F (med ventil).
+// Dragpositioner. Naturtonserien på B♭; ventilerna sänker grundtonen med ett antal halvtoner.
+// Med ventil blir avståndet mellan positionerna längre, så positionen räknas om till
+// var draget faktiskt står (samma numrering som på B♭, i halva steg).
 const BB_PARTIALS = [34, 46, 53, 58, 62, 65, 70, 72, 74, 77];
-const F_PARTIALS = [29, 41, 48];
+const VALVES = {
+  none: [],
+  f:    [["F", 5]],
+  fgbd: [["F", 5], ["G♭", 4], ["D", 8]],
+  fgbe: [["F", 5], ["G♭", 4], ["E♭", 7]]
+};
+function fmtPos(p){
+  const whole = Math.floor(p), half = p - whole >= 0.5;
+  return whole + (half ? "½" : "");
+}
 function slideText(m){
-  const main = [], trig = [];
+  const main = [];
   BB_PARTIALS.forEach(p => { const d = p - m; if(d >= 0 && d <= 6) main.push(d + 1); });
-  const useTrig = m >= 24 && m <= 48 && (!main.length || Math.min(...main) >= 5);
-  if(useTrig) F_PARTIALS.forEach(p => { const d = p - m; if(d >= 0 && d <= 5) trig.push(d + 1); });
-  main.sort((a, b) => a - b); trig.sort((a, b) => a - b);
-  let t = main.length ? "Drag: " + main[0] + (main.length > 1 ? " (även " + main.slice(1).join(", ") + ")" : "") : "";
-  if(trig.length) t += (t ? " · " : "") + "F-ventil: T" + trig.join(", T");
-  return t || "Drag: –";
+  main.sort((a, b) => a - b);
+  const parts = [];
+  if(main.length) parts.push("Drag: " + main[0] + (main.length > 1 ? " (även " + main.slice(1).join(", ") + ")" : ""));
+  const needValve = !main.length || main[0] >= 5;
+  if(needValve && m <= 50){
+    VALVES[S.valves].forEach(([name, off]) => {
+      let best = null;
+      BB_PARTIALS.forEach(bp => {
+        const d = (bp - off) - m;
+        if(d < 0) return;
+        const pos = 1 + 12 * Math.log2(1 + Math.pow(2, off/12) * (Math.pow(2, d/12) - 1));
+        if(pos <= 7.3 && (best === null || pos < best)) best = pos;
+      });
+      if(best !== null) parts.push(name + " " + fmtPos(Math.max(1, Math.round(best * 2) / 2)));
+    });
+  }
+  return parts.length ? parts.join(" · ") : "Utom räckhåll";
 }
 
 function showPitch(freq){
@@ -513,11 +546,15 @@ let pickClef;
 segment($("instSeg"), S.inst, v => {
   S.inst = v; store.set("inst", v); history = [];
   if(v === "guitar") pickClef("treble"); else if(v === "trombone" && S.clef === "treble") pickClef("bass");
-  renderStrings(); drawStaff(); clearPitch();
+  renderStrings(); drawStaff(); clearPitch(); renderValveRow();
 });
 segment($("clefSeg"), S.clef, v => { S.clef = v; store.set("clef", v); drawStaff(); clearPitch(); });
 pickClef = v => { S.clef = v; store.set("clef", v); $("clefSeg").querySelectorAll("button").forEach(b => b.classList.toggle("sel", b.dataset.v === v)); };
 drawStaff();
+const vs = $("valveSel"); vs.value = S.valves;
+vs.addEventListener("change", () => { S.valves = vs.value; store.set("valves", S.valves); });
+function renderValveRow(){ $("valveRow").style.display = S.inst === "trombone" ? "" : "none"; }
+renderValveRow();
 renderStrings();
 
 /* =========================================================
