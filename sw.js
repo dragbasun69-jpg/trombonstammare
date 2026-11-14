@@ -1,5 +1,5 @@
 // Nätet först, så att uppdateringar kommer fram. Sparad kopia används offline.
-const CACHE = "stammare-v3";
+const CACHE = "stammare-v4";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 
 self.addEventListener("install", e => {

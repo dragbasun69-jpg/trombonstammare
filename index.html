@@ -91,7 +91,7 @@
       <div class="hz" id="hz">Tryck på Starta och spela en ton</div>
       <div class="slide" id="slide"></div>
     </div>
-    <svg class="staff" id="staff" viewBox="0 10 320 150" aria-label="Notblad">
+    <svg class="staff" id="staff" viewBox="0 10 320 180" aria-label="Notblad">
       <g id="staffLines"></g><g id="clefG"></g><g id="noteG"></g>
     </svg>
     <div class="strings" id="strings"></div>
@@ -260,7 +260,7 @@ function detectPitch(input, sampleRate){
   if(rms < 0.008) return null;
   const fs = sampleRate / 2;
   const minTau = Math.max(2, Math.floor(fs / 1100));
-  const maxTau = Math.min(Math.floor(fs / 38), n >> 1);
+  const maxTau = Math.min(Math.floor(fs / 26), n >> 1);
   const W = n - maxTau;
   const d = new Float32Array(maxTau + 1);
   for(let tau = 1; tau <= maxTau; tau++){
@@ -375,11 +375,11 @@ function drawNote(writtenMidi, color){
 
 // Dragpositioner för B♭-trombon (klingande ton). Naturtonserien på B♭ och på F (med ventil).
 const BB_PARTIALS = [34, 46, 53, 58, 62, 65, 70, 72, 74, 77];
-const F_PARTIALS = [41, 48];
+const F_PARTIALS = [29, 41, 48];
 function slideText(m){
   const main = [], trig = [];
   BB_PARTIALS.forEach(p => { const d = p - m; if(d >= 0 && d <= 6) main.push(d + 1); });
-  const useTrig = m >= 36 && m <= 48 && (!main.length || Math.min(...main) >= 5);
+  const useTrig = m >= 24 && m <= 48 && (!main.length || Math.min(...main) >= 5);
   if(useTrig) F_PARTIALS.forEach(p => { const d = p - m; if(d >= 0 && d <= 5) trig.push(d + 1); });
   main.sort((a, b) => a - b); trig.sort((a, b) => a - b);
   let t = main.length ? "Drag: " + main[0] + (main.length > 1 ? " (även " + main.slice(1).join(", ") + ")" : "") : "";
@@ -455,7 +455,7 @@ function tunerLoop(now){
   lastRun = now;
   analyser.getFloatTimeDomainData(buf);
   const r = detectPitch(buf, ctx.sampleRate);
-  if(r && r.freq > 38 && r.freq < 1100){
+  if(r && r.freq > 26 && r.freq < 1100){
     // Ny ton (mer än en halvton bort)? Börja om utjämningen.
     if(history.length && Math.abs(12 * Math.log2(r.freq / median(history))) > 0.7) history = [];
     history.push(r.freq); if(history.length > 5) history.shift();
