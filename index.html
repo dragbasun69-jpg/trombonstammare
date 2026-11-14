@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111418">
+<title>Trombonstämmare</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root{
+    --bg:#111418; --panel:#1b2027; --line:#2c333d; --text:#f2f4f7; --muted:#9aa4b2;
+    --ok:#3ddc84; --warn:#ffc93c; --bad:#ff5c5c; --accent:#5ab0ff;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  body{display:flex;flex-direction:column;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+  main{flex:1;overflow:auto;padding:16px}
+  .view{display:none;max-width:520px;margin:0 auto}
+  .view.active{display:block}
+  h1{font-size:1rem;font-weight:600;color:var(--muted);margin:4px 0 12px;text-align:center;letter-spacing:.04em;text-transform:uppercase}
+  button{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);
+    border-radius:14px;padding:12px 14px;cursor:pointer;touch-action:manipulation}
+  button:active{transform:scale(.97)}
+  .big-btn{width:100%;font-size:1.3rem;font-weight:700;padding:18px;border:none;background:var(--accent);color:#06121f}
+  .big-btn.on{background:var(--bad);color:#fff}
+
+  /* Stämapparat */
+  .note-wrap{text-align:center;padding:10px 0 4px}
+  .note{font-size:7.5rem;font-weight:800;line-height:1;transition:color .15s}
+  .note sub{font-size:2.4rem;font-weight:600;color:var(--muted);vertical-align:baseline;margin-left:4px}
+  .hz{color:var(--muted);font-size:1.1rem;margin-top:6px;min-height:1.4em}
+  .meter{position:relative;height:84px;margin:18px 0 6px;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+  .zone{position:absolute;top:0;bottom:0;left:45%;width:10%;background:rgba(61,220,132,.16)}
+  .tick{position:absolute;bottom:0;width:2px;background:var(--line)}
+  .tick.center{background:var(--ok);width:3px;top:0}
+  .needle{position:absolute;top:8px;bottom:8px;width:8px;margin-left:-4px;left:50%;border-radius:4px;background:var(--muted);transition:left .08s linear,background .15s}
+  .scale{display:flex;justify-content:space-between;color:var(--muted);font-size:.85rem;padding:0 4px}
+  .cents{text-align:center;font-size:1.6rem;font-weight:700;margin:14px 0 18px;min-height:1.3em}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+  .settings{display:grid;gap:10px;margin-top:18px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+  .row label{color:var(--muted)}
+  .stepper{display:flex;align-items:center;gap:8px}
+  .stepper button{width:46px;height:46px;padding:0;font-size:1.4rem;font-weight:700}
+  .stepper output{min-width:80px;text-align:center;font-size:1.15rem;font-weight:700}
+  .seg{display:flex;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .seg button{border:none;border-radius:0;padding:10px 14px;background:transparent;color:var(--muted)}
+  .seg button.sel{background:var(--accent);color:#06121f;font-weight:700}
+  .msg{color:var(--warn);text-align:center;min-height:1.2em;margin-top:10px}
+
+  /* Metronom */
+  .bpm{text-align:center;font-size:6.5rem;font-weight:800;line-height:1;margin-top:6px}
+  .bpm-label{text-align:center;color:var(--muted);font-size:1.1rem;margin:4px 0 12px}
+  input[type=range]{width:100%;height:44px;accent-color:var(--accent)}
+  .bpm-btns{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:8px 0 16px}
+  .bpm-btns button{font-size:1.2rem;font-weight:700;padding:14px 0}
+  .dots{display:flex;justify-content:center;flex-wrap:wrap;gap:12px;margin:22px 0;min-height:44px}
+  .dot{width:36px;height:36px;border-radius:50%;background:var(--panel);border:2px solid var(--line);transition:background .05s}
+  .dot.first{border-color:var(--warn)}
+  .dot.lit{background:var(--accent);border-color:var(--accent)}
+  .dot.first.lit{background:var(--warn);border-color:var(--warn)}
+
+  nav{display:flex;border-top:1px solid var(--line);background:var(--panel);padding-bottom:env(safe-area-inset-bottom)}
+  nav button{flex:1;border:none;border-radius:0;background:transparent;padding:16px 0;font-size:1.05rem;color:var(--muted)}
+  nav button.sel{color:var(--text);font-weight:700;box-shadow:inset 0 3px 0 var(--accent)}
+</style>
+</head>
+<body>
+<main>
+  <!-- STÄMAPPARAT -->
+  <section id="tuner" class="view active">
+    <h1>Stämapparat</h1>
+    <div class="note-wrap">
+      <div class="note" id="note">–</div>
+      <div class="hz" id="hz">Tryck på Starta och spela en ton</div>
+    </div>
+    <div class="meter" id="meter">
+      <div class="zone"></div>
+      <div class="needle" id="needle"></div>
+    </div>
+    <div class="scale"><span>−50</span><span>−25</span><span>0</span><span>+25</span><span>+50</span></div>
+    <div class="cents" id="cents">&nbsp;</div>
+    <button class="big-btn" id="tunerBtn">Starta</button>
+    <div class="msg" id="tunerMsg"></div>
+
+    <div class="settings">
+      <div class="row">
+        <label>Stämton A</label>
+        <div class="stepper">
+          <button id="aDown" aria-label="Sänk stämton">−</button>
+          <output id="aVal">440 Hz</output>
+          <button id="aUp" aria-label="Höj stämton">+</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Visning</label>
+        <div class="seg" id="transSeg">
+          <button data-v="0">Klingande C</button>
+          <button data-v="2">B♭-instrument</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Notnamn</label>
+        <div class="seg" id="namesSeg">
+          <button data-v="sv">Svenska B/H</button>
+          <button data-v="int">B♭/B</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- METRONOM -->
+  <section id="metro" class="view">
+    <h1>Metronom</h1>
+    <div class="bpm" id="bpm">100</div>
+    <div class="bpm-label" id="bpmName">slag/min · Moderato</div>
+    <input type="range" id="bpmRange" min="30" max="260" value="100" aria-label="Tempo">
+    <div class="bpm-btns">
+      <button data-d="-5">−5</button><button data-d="-1">−1</button>
+      <button data-d="1">+1</button><button data-d="5">+5</button>
+    </div>
+    <div class="row">
+      <label>Taktart</label>
+      <div class="stepper">
+        <button id="bDown" aria-label="Färre slag">−</button>
+        <output id="bVal">4/4</output>
+        <button id="bUp" aria-label="Fler slag">+</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label>Betonad etta</label>
+      <div class="seg" id="accSeg">
+        <button data-v="1">På</button><button data-v="0">Av</button>
+      </div>
+    </div>
+    <div class="dots" id="dots"></div>
+    <button class="big-btn" id="metroBtn">Starta</button>
+  </section>
+</main>
+
+<nav>
+  <button class="sel" data-view="tuner">Stämapparat</button>
+  <button data-view="metro">Metronom</button>
+</nav>
+
+<script>
+"use strict";
+/* ---------- Inställningar (sparas i telefonen) ---------- */
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem("tsm_"+k); return v===null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem("tsm_"+k, JSON.stringify(v)); }catch(e){} }
+};
+const S = {
+  aRef: store.get("aRef", 440),
+  trans: store.get("trans", 0),
+  names: store.get("names", "sv"),
+  bpm: store.get("bpm", 100),
+  beats: store.get("beats", 4),
+  accent: store.get("accent", true)
+};
+const $ = id => document.getElementById(id);
+
+let ctx = null;
+function audio(){
+  if(!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if(ctx.state === "suspended") ctx.resume();
+  return ctx;
+}
+
+/* ---------- Skärmen tänd ---------- */
+let wakeLock = null;
+async function updateWakeLock(){
+  const want = tunerOn || metroOn;
+  try{
+    if(want && !wakeLock && "wakeLock" in navigator){
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    }else if(!want && wakeLock){ await wakeLock.release(); wakeLock = null; }
+  }catch(e){}
+}
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible") updateWakeLock(); });
+
+/* ---------- Flikar ---------- */
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("sel", x === b));
+  document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.id === b.dataset.view));
+  if(b.dataset.view !== "tuner" && tunerOn) stopTuner();
+}));
+
+function segment(el, value, onPick){
+  const btns = el.querySelectorAll("button");
+  const mark = v => btns.forEach(b => b.classList.toggle("sel", b.dataset.v === String(v)));
+  mark(value);
+  btns.forEach(b => b.addEventListener("click", () => { mark(b.dataset.v); onPick(b.dataset.v); }));
+}
+
+/* =========================================================
+   STÄMAPPARAT
+   ========================================================= */
+const NAMES = {
+  sv:  ["C","D♭","D","E♭","E","F","F♯","G","A♭","A","B","H"],
+  int: ["C","D♭","D","E♭","E","F","F♯","G","A♭","A","B♭","B"]
+};
+let tunerOn = false, stream = null, analyser = null, buf = null, srcNode = null;
+let lastRun = 0, lastHeard = 0, history = [], centsSmooth = 0;
+
+// YIN-tonhöjdsdetektering. Signalen halveras i samplingstakt för fart;
+// trombonens grundtoner ligger långt under 1 kHz.
+function detectPitch(input, sampleRate){
+  const n = input.length >> 1;
+  const x = new Float32Array(n);
+  let rms = 0;
+  for(let i = 0; i < n; i++){ const v = (input[2*i] + input[2*i+1]) * 0.5; x[i] = v; rms += v*v; }
+  rms = Math.sqrt(rms / n);
+  if(rms < 0.008) return null;
+  const fs = sampleRate / 2;
+  const minTau = Math.max(2, Math.floor(fs / 1100));
+  const maxTau = Math.min(Math.floor(fs / 38), n >> 1);
+  const W = n - maxTau;
+  const d = new Float32Array(maxTau + 1);
+  for(let tau = 1; tau <= maxTau; tau++){
+    let s = 0;
+    for(let j = 0; j < W; j++){ const df = x[j] - x[j+tau]; s += df*df; }
+    d[tau] = s;
+  }
+  const c = new Float32Array(maxTau + 1); c[0] = 1;
+  let run = 0;
+  for(let tau = 1; tau <= maxTau; tau++){ run += d[tau]; c[tau] = run > 0 ? d[tau] * tau / run : 1; }
+  let tau = -1;
+  for(let t = minTau; t <= maxTau; t++){
+    if(c[t] < 0.12){ while(t + 1 <= maxTau && c[t+1] < c[t]) t++; tau = t; break; }
+  }
+  if(tau < 0){
+    let best = minTau;
+    for(let t = minTau; t <= maxTau; t++) if(c[t] < c[best]) best = t;
+    if(c[best] > 0.3) return null;
+    tau = best;
+  }
+  let t = tau;
+  if(tau > 1 && tau < maxTau){
+    const a = c[tau-1], b = c[tau], cc = c[tau+1], den = a - 2*b + cc;
+    if(den !== 0) t = tau + 0.5 * (a - cc) / den;
+  }
+  return { freq: fs / t, clarity: 1 - c[tau] };
+}
+
+function median(arr){ const s = [...arr].sort((a,b) => a-b); return s[s.length >> 1]; }
+
+function showPitch(freq){
+  const midiExact = 69 + 12 * Math.log2(freq / S.aRef);
+  const midi = Math.round(midiExact);
+  const cents = (midiExact - midi) * 100;
+  centsSmooth = Math.abs(cents - centsSmooth) > 30 ? cents : centsSmooth * 0.6 + cents * 0.4;
+  const shown = midi + S.trans;
+  const name = NAMES[S.names][((shown % 12) + 12) % 12];
+  const oct = Math.floor(shown / 12) - 1;
+  const cls = Math.abs(centsSmooth) <= 5 ? "ok" : Math.abs(centsSmooth) <= 15 ? "warn" : "bad";
+  const col = cls === "ok" ? "var(--ok)" : cls === "warn" ? "var(--warn)" : "var(--bad)";
+  const noteEl = $("note");
+  noteEl.innerHTML = name + "<sub>" + oct + "</sub>";
+  noteEl.style.color = col;
+  $("hz").textContent = freq.toFixed(1).replace(".", ",") + " Hz";
+  const pos = 50 + Math.max(-50, Math.min(50, centsSmooth));
+  const needle = $("needle");
+  needle.style.left = pos + "%";
+  needle.style.background = col;
+  const c = Math.round(centsSmooth);
+  const centsEl = $("cents");
+  centsEl.className = "cents " + cls;
+  centsEl.textContent = cls === "ok" ? "✓ Rent  " + (c > 0 ? "+" : c < 0 ? "−" : "±") + Math.abs(c)
+    : (c < 0 ? "↑ För lågt  −" + Math.abs(c) + " cent" : "↓ För högt  +" + c + " cent");
+}
+
+function clearPitch(){
+  $("note").textContent = "–"; $("note").style.color = "";
+  $("hz").textContent = tunerOn ? "Lyssnar …" : "Tryck på Starta och spela en ton";
+  $("cents").innerHTML = "&nbsp;"; $("cents").className = "cents";
+  $("needle").style.left = "50%"; $("needle").style.background = "var(--muted)";
+}
+
+function tunerLoop(now){
+  if(!tunerOn) return;
+  requestAnimationFrame(tunerLoop);
+  if(now - lastRun < 45) return;
+  lastRun = now;
+  analyser.getFloatTimeDomainData(buf);
+  const r = detectPitch(buf, ctx.sampleRate);
+  if(r && r.freq > 38 && r.freq < 1100){
+    // Ny ton (mer än en halvton bort)? Börja om utjämningen.
+    if(history.length && Math.abs(12 * Math.log2(r.freq / median(history))) > 0.7) history = [];
+    history.push(r.freq); if(history.length > 5) history.shift();
+    lastHeard = now;
+    showPitch(median(history));
+  }else if(now - lastHeard > 1500){
+    history = []; clearPitch();
+  }
+}
+
+async function startTuner(){
+  $("tunerMsg").textContent = "";
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    $("tunerMsg").textContent = "Mikrofonen kräver att appen öppnas via https.";
+    return;
+  }
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+  }catch(e){
+    $("tunerMsg").textContent = "Fick inte tillgång till mikrofonen. Tillåt mikrofon för sidan i Chrome.";
+    return;
+  }
+  const ac = audio();
+  srcNode = ac.createMediaStreamSource(stream);
+  analyser = ac.createAnalyser();
+  analyser.fftSize = 8192;
+  buf = new Float32Array(analyser.fftSize);
+  srcNode.connect(analyser);
+  tunerOn = true; history = [];
+  $("tunerBtn").textContent = "Stoppa"; $("tunerBtn").classList.add("on");
+  clearPitch(); updateWakeLock();
+  requestAnimationFrame(tunerLoop);
+}
+function stopTuner(){
+  tunerOn = false;
+  if(srcNode) srcNode.disconnect();
+  if(stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; srcNode = null;
+  $("tunerBtn").textContent = "Starta"; $("tunerBtn").classList.remove("on");
+  clearPitch(); updateWakeLock();
+}
+$("tunerBtn").addEventListener("click", () => tunerOn ? stopTuner() : startTuner());
+
+function renderA(){ $("aVal").textContent = S.aRef + " Hz"; store.set("aRef", S.aRef); }
+$("aDown").addEventListener("click", () => { S.aRef = Math.max(415, S.aRef - 1); renderA(); });
+$("aUp").addEventListener("click", () => { S.aRef = Math.min(466, S.aRef + 1); renderA(); });
+renderA();
+segment($("transSeg"), S.trans, v => { S.trans = +v; store.set("trans", S.trans); });
+segment($("namesSeg"), S.names, v => { S.names = v; store.set("names", v); });
+
+/* =========================================================
+   METRONOM
+   ========================================================= */
+let metroOn = false, nextTime = 0, beatIdx = 0, visQueue = [], master = null, lastLit = -1;
+const timer = new Worker(URL.createObjectURL(new Blob([
+  "let id=null;onmessage=e=>{if(e.data==='start'){if(!id)id=setInterval(()=>postMessage(0),25)}else{clearInterval(id);id=null}}"
+], { type: "text/javascript" })));
+timer.onmessage = scheduler;
+
+function tempoName(b){
+  return b < 40 ? "Grave" : b < 60 ? "Largo" : b < 66 ? "Larghetto" : b < 76 ? "Adagio"
+    : b < 108 ? "Andante" : b < 120 ? "Moderato" : b < 156 ? "Allegro" : b < 176 ? "Vivace"
+    : b < 200 ? "Presto" : "Prestissimo";
+}
+function renderBpm(){
+  $("bpm").textContent = S.bpm;
+  $("bpmRange").value = S.bpm;
+  $("bpmName").textContent = "slag/min · " + tempoName(S.bpm);
+  store.set("bpm", S.bpm);
+}
+function setBpm(v){ S.bpm = Math.max(30, Math.min(260, Math.round(v))); renderBpm(); }
+$("bpmRange").addEventListener("input", e => setBpm(+e.target.value));
+document.querySelectorAll(".bpm-btns button").forEach(b =>
+  b.addEventListener("click", () => setBpm(S.bpm + +b.dataset.d)));
+
+function renderBeats(){
+  $("bVal").textContent = S.beats + "/4";
+  const dots = $("dots"); dots.innerHTML = "";
+  for(let i = 0; i < S.beats; i++){
+    const d = document.createElement("div");
+    d.className = "dot" + (i === 0 && S.accent && S.beats > 1 ? " first" : "");
+    dots.appendChild(d);
+  }
+  lastLit = -1;
+  store.set("beats", S.beats);
+}
+$("bDown").addEventListener("click", () => { S.beats = Math.max(1, S.beats - 1); beatIdx %= S.beats; renderBeats(); });
+$("bUp").addEventListener("click", () => { S.beats = Math.min(12, S.beats + 1); renderBeats(); });
+segment($("accSeg"), S.accent ? 1 : 0, v => { S.accent = v === "1"; store.set("accent", S.accent); renderBeats(); });
+
+function click(t, accent){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = "triangle";
+  o.frequency.value = accent ? 1760 : 1100;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(accent ? 1 : 0.6, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+  o.connect(g); g.connect(master);
+  o.start(t); o.stop(t + 0.07);
+}
+function scheduler(){
+  if(!metroOn) return;
+  while(nextTime < ctx.currentTime + 0.12){
+    const b = beatIdx % S.beats;
+    click(nextTime, S.accent && b === 0 && S.beats > 1);
+    visQueue.push({ t: nextTime, b });
+    nextTime += 60 / S.bpm;
+    beatIdx = (b + 1) % S.beats;
+  }
+}
+function drawBeats(){
+  if(!metroOn) return;
+  requestAnimationFrame(drawBeats);
+  const now = ctx.currentTime;
+  let cur = null;
+  while(visQueue.length && visQueue[0].t <= now) cur = visQueue.shift();
+  if(cur && cur.b !== lastLit){
+    const dots = $("dots").children;
+    for(let i = 0; i < dots.length; i++) dots[i].classList.toggle("lit", i === cur.b);
+    lastLit = cur.b;
+  }
+}
+function startMetro(){
+  const ac = audio();
+  if(!master){ master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination); }
+  metroOn = true; beatIdx = 0; visQueue = []; lastLit = -1;
+  nextTime = ac.currentTime + 0.08;
+  timer.postMessage("start");
+  scheduler();
+  requestAnimationFrame(drawBeats);
+  $("metroBtn").textContent = "Stoppa"; $("metroBtn").classList.add("on");
+  updateWakeLock();
+}
+function stopMetro(){
+  metroOn = false;
+  timer.postMessage("stop");
+  [...$("dots").children].forEach(d => d.classList.remove("lit"));
+  $("metroBtn").textContent = "Starta"; $("metroBtn").classList.remove("on");
+  updateWakeLock();
+}
+$("metroBtn").addEventListener("click", () => metroOn ? stopMetro() : startMetro());
+renderBpm(); renderBeats();
+
+/* ---------- Offline + installation ---------- */
+if("serviceWorker" in navigator && location.protocol === "https:"){
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
