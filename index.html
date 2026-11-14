@@ -34,8 +34,10 @@
 
   /* Stämapparat */
   .note-wrap{text-align:center;padding:10px 0 4px}
-  .note{font-size:7.5rem;font-weight:800;line-height:1;transition:color .15s}
-  .note sub{font-size:2.4rem;font-weight:600;color:var(--muted);vertical-align:baseline;margin-left:4px}
+  .staff{display:block;width:100%;max-width:360px;margin:6px auto 0;height:auto}
+  .slide{min-height:1.4em;margin-top:4px;font-size:1.15rem;font-weight:700;color:var(--accent)}
+  .note{font-size:5.5rem;font-weight:800;line-height:1;transition:color .15s}
+  .note sub{font-size:1.9rem;font-weight:600;color:var(--muted);vertical-align:baseline;margin-left:4px}
   .hz{color:var(--muted);font-size:1.1rem;margin-top:6px;min-height:1.4em}
   .meter{position:relative;height:84px;margin:18px 0 6px;background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden}
   .zone{position:absolute;top:0;bottom:0;left:45%;width:10%;background:rgba(61,220,132,.16)}
@@ -87,7 +89,11 @@
     <div class="note-wrap">
       <div class="note" id="note">–</div>
       <div class="hz" id="hz">Tryck på Starta och spela en ton</div>
+      <div class="slide" id="slide"></div>
     </div>
+    <svg class="staff" id="staff" viewBox="0 10 320 150" aria-label="Notblad">
+      <g id="staffLines"></g><g id="clefG"></g><g id="noteG"></g>
+    </svg>
     <div class="strings" id="strings"></div>
     <div class="meter" id="meter">
       <div class="zone"></div>
@@ -102,8 +108,9 @@
       <div class="row">
         <label>Instrument</label>
         <div class="seg" id="instSeg">
-          <button data-v="chrom">Kromatisk</button>
+          <button data-v="trombone">Trombon</button>
           <button data-v="guitar">Gitarr</button>
+          <button data-v="chrom">Övrigt</button>
         </div>
       </div>
       <div class="row">
@@ -112,6 +119,14 @@
           <button id="aDown" aria-label="Sänk stämton">−</button>
           <output id="aVal">440 Hz</output>
           <button id="aUp" aria-label="Höj stämton">+</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Klav</label>
+        <div class="seg" id="clefSeg">
+          <button data-v="bass">Bas</button>
+          <button data-v="tenor">Tenor</button>
+          <button data-v="treble">G</button>
         </div>
       </div>
       <div class="row" id="transRow">
@@ -179,8 +194,9 @@ const S = {
   bpm: store.get("bpm", 100),
   beats: store.get("beats", 4),
   accent: store.get("accent", true),
-  inst: store.get("inst", "chrom")
+  inst: store.get("inst", "trombone")
 };
+S.clef = store.get("clef", S.inst === "guitar" ? "treble" : "bass");
 const GUITAR = [40, 45, 50, 55, 59, 64]; // E2 A2 D3 G3 H3 E4
 
 // iPhone: styr ljudsessionen så att metronomen hörs även på ljudlöst läge
@@ -230,10 +246,6 @@ function segment(el, value, onPick){
 /* =========================================================
    STÄMAPPARAT
    ========================================================= */
-const NAMES = {
-  sv:  ["C","D♭","D","E♭","E","F","F♯","G","A♭","A","B","H"],
-  int: ["C","D♭","D","E♭","E","F","F♯","G","A♭","A","B♭","B"]
-};
 let tunerOn = false, stream = null, analyser = null, buf = null, srcNode = null;
 let lastRun = 0, lastHeard = 0, history = [], centsSmooth = 0;
 
@@ -279,6 +291,102 @@ function detectPitch(input, sampleRate){
 
 function median(arr){ const s = [...arr].sort((a,b) => a-b); return s[s.length >> 1]; }
 
+/* ---------- Notnamn, notblad och dragpositioner ---------- */
+const SPELL = {
+  flat:  [["C",0],["D",-1],["D",0],["E",-1],["E",0],["F",0],["F",1],["G",0],["A",-1],["A",0],["B",-1],["B",0]],
+  sharp: [["C",0],["C",1],["D",0],["D",1],["E",0],["F",0],["F",1],["G",0],["G",1],["A",0],["A",1],["B",0]]
+};
+const LETTER_IDX = { C:0, D:1, E:2, F:3, G:4, A:5, B:6 };
+function spell(midi){
+  const [letter, acc] = SPELL[S.inst === "guitar" ? "sharp" : "flat"][((midi % 12) + 12) % 12];
+  return { letter, acc, oct: Math.floor(midi / 12) - 1 };
+}
+function noteName(sp){
+  if(sp.letter === "B" && sp.acc !== 1){
+    if(S.names === "sv") return sp.acc === -1 ? "B" : "H";
+    return sp.acc === -1 ? "B♭" : "B";
+  }
+  return sp.letter + (sp.acc === 1 ? "♯" : sp.acc === -1 ? "♭" : "");
+}
+
+// Notbladet: linjer på y = 70, 80, 90, 100, 110. Ett diatoniskt steg = 5 enheter.
+const SVGNS = "http://www.w3.org/2000/svg";
+const BOTTOM = 110, HALF = 5, NOTE_X = 205;
+const CLEF_BOTTOM = { bass: 18, tenor: 22, treble: 30 }; // steg för nedersta linjen: G2, D3, E4
+function el(tag, attrs, parent){
+  const e = document.createElementNS(SVGNS, tag);
+  for(const k in attrs) e.setAttribute(k, attrs[k]);
+  if(parent) parent.appendChild(e);
+  return e;
+}
+function drawStaff(){
+  const L = $("staffLines"); L.innerHTML = "";
+  for(let i = 0; i < 5; i++) el("line", { x1: 8, x2: 312, y1: 70 + i*10, y2: 70 + i*10, stroke: "#9aa4b2", "stroke-width": 1.4 }, L);
+  const C = $("clefG"); C.innerHTML = "";
+  const ink = { fill: "none", stroke: "#f2f4f7", "stroke-linecap": "round", "stroke-linejoin": "round" };
+  if(S.clef === "treble"){
+    const x = 34, g = 100; // G-linjen
+    el("path", Object.assign({}, ink, { "stroke-width": 3, d:
+      `M${x+3} ${g+1} C${x-5} ${g+2} ${x-6} ${g-9} ${x+2} ${g-10} C${x+12} ${g-11} ${x+14} ${g+9} ${x+1} ${g+10} ` +
+      `C${x-14} ${g+10} ${x-14} ${g-12} ${x+1} ${g-21} C${x+9} ${g-27} ${x+12} ${g-37} ${x+8} ${g-44} ` +
+      `C${x+4} ${g-50} ${x-3} ${g-42} ${x-1} ${g-31} L${x+6} ${g+19} ` +
+      `C${x+8} ${g+28} ${x-1} ${g+31} ${x-4} ${g+25}` }), C);
+    el("circle", { cx: x-3, cy: g+24, r: 3.4, fill: "#f2f4f7" }, C);
+    if(S.inst === "guitar"){
+      const t = el("text", { x: x+3, y: g+43, "text-anchor": "middle", fill: "#f2f4f7", "font-size": 12, "font-weight": 700 }, C);
+      t.textContent = "8";
+    }
+  }else if(S.clef === "bass"){
+    const x = 22, f = 80; // F-linjen
+    el("circle", { cx: x+3, cy: f, r: 4.2, fill: "#f2f4f7" }, C);
+    el("path", Object.assign({}, ink, { "stroke-width": 3.2, d:
+      `M${x} ${f} C${x-1} ${f-11} ${x+11} ${f-15} ${x+19} ${f-10} C${x+28} ${f-4} ${x+26} ${f+12} ${x+17} ${f+20} C${x+11} ${f+25} ${x+4} ${f+28} ${x-2} ${f+30}` }), C);
+    el("circle", { cx: x+33, cy: f-5, r: 2.6, fill: "#f2f4f7" }, C);
+    el("circle", { cx: x+33, cy: f+5, r: 2.6, fill: "#f2f4f7" }, C);
+  }else{
+    const x = 18, c = 80, top = 70, bot = 110; // C-linjen (fjärde linjen = tenorklav)
+    el("rect", { x: x, y: c-21, width: 5, height: 42, fill: "#f2f4f7" }, C);
+    el("rect", { x: x+8, y: c-21, width: 2, height: 42, fill: "#f2f4f7" }, C);
+    const curl = (dir) => { // dir = -1 övre halvan, +1 nedre
+      const yEnd = c + dir*19;
+      return `M${x+10} ${c} L${x+15} ${c+dir*6} C${x+31} ${c+dir*2} ${x+32} ${yEnd} ${x+22} ${yEnd-dir*1}`;
+    };
+    el("path", Object.assign({}, ink, { "stroke-width": 3, d: curl(-1) + " " + curl(1) }), C);
+    el("circle", { cx: x+22, cy: c-18, r: 3.2, fill: "#f2f4f7" }, C);
+    el("circle", { cx: x+22, cy: c+18, r: 3.2, fill: "#f2f4f7" }, C);
+  }
+}
+function drawNote(writtenMidi, color){
+  const G = $("noteG"); G.innerHTML = "";
+  if(writtenMidi === null) return;
+  const sp = spell(writtenMidi);
+  const d = sp.oct * 7 + LETTER_IDX[sp.letter] - CLEF_BOTTOM[S.clef];
+  const y = BOTTOM - d * HALF;
+  const ledger = yy => el("line", { x1: NOTE_X-15, x2: NOTE_X+15, y1: yy, y2: yy, stroke: "#9aa4b2", "stroke-width": 1.6 }, G);
+  for(let k = -2; k >= d; k -= 2) ledger(BOTTOM - k*HALF);
+  for(let k = 10; k <= d; k += 2) ledger(BOTTOM - k*HALF);
+  el("ellipse", { cx: NOTE_X, cy: y, rx: 8, ry: 5.6, transform: `rotate(-20 ${NOTE_X} ${y})`, fill: color }, G);
+  if(sp.acc !== 0){
+    const t = el("text", { x: NOTE_X-14, y: y + (sp.acc === -1 ? 3 : 6), "text-anchor": "end", fill: color,
+      "font-size": sp.acc === -1 ? 24 : 21, "font-weight": 700 }, G);
+    t.textContent = sp.acc === -1 ? "♭" : "♯";
+  }
+}
+
+// Dragpositioner för B♭-trombon (klingande ton). Naturtonserien på B♭ och på F (med ventil).
+const BB_PARTIALS = [34, 46, 53, 58, 62, 65, 70, 72, 74, 77];
+const F_PARTIALS = [41, 48];
+function slideText(m){
+  const main = [], trig = [];
+  BB_PARTIALS.forEach(p => { const d = p - m; if(d >= 0 && d <= 6) main.push(d + 1); });
+  const useTrig = m >= 36 && m <= 48 && (!main.length || Math.min(...main) >= 5);
+  if(useTrig) F_PARTIALS.forEach(p => { const d = p - m; if(d >= 0 && d <= 5) trig.push(d + 1); });
+  main.sort((a, b) => a - b); trig.sort((a, b) => a - b);
+  let t = main.length ? "Drag: " + main[0] + (main.length > 1 ? " (även " + main.slice(1).join(", ") + ")" : "") : "";
+  if(trig.length) t += (t ? " · " : "") + "F-ventil: T" + trig.join(", T");
+  return t || "Drag: –";
+}
+
 function showPitch(freq){
   const midiExact = 69 + 12 * Math.log2(freq / S.aRef);
   let midi = Math.round(midiExact), strIdx = -1;
@@ -290,14 +398,16 @@ function showPitch(freq){
   const cents = (midiExact - midi) * 100;
   centsSmooth = Math.abs(cents - centsSmooth) > 30 ? cents : centsSmooth * 0.6 + cents * 0.4;
   const shown = midi + (S.inst === "guitar" ? 0 : S.trans);
-  const name = NAMES[S.names][((shown % 12) + 12) % 12];
-  const oct = Math.floor(shown / 12) - 1;
+  const sp = spell(shown);
   const cls = Math.abs(centsSmooth) <= 5 ? "ok" : Math.abs(centsSmooth) <= 15 ? "warn" : "bad";
   const col = cls === "ok" ? "var(--ok)" : cls === "warn" ? "var(--warn)" : "var(--bad)";
+  const hex = cls === "ok" ? "#3ddc84" : cls === "warn" ? "#ffc93c" : "#ff5c5c";
   const noteEl = $("note");
-  noteEl.innerHTML = name + "<sub>" + oct + "</sub>";
+  noteEl.innerHTML = noteName(sp) + "<sub>" + sp.oct + "</sub>";
   noteEl.style.color = col;
   $("hz").textContent = freq.toFixed(1).replace(".", ",") + " Hz";
+  $("slide").textContent = S.inst === "trombone" ? slideText(midi) : "";
+  drawNote(shown + (S.inst === "guitar" ? 12 : 0), hex); // gitarr noteras en oktav högre än den klingar
   const pos = 50 + Math.max(-50, Math.min(50, centsSmooth));
   const needle = $("needle");
   needle.style.left = pos + "%";
@@ -316,6 +426,8 @@ function clearPitch(){
   $("cents").innerHTML = "&nbsp;"; $("cents").className = "cents";
   $("needle").style.left = "50%"; $("needle").style.background = "var(--muted)";
   markString(-1, false);
+  $("slide").textContent = "";
+  drawNote(null);
 }
 function renderStrings(){
   const el = $("strings");
@@ -323,7 +435,7 @@ function renderStrings(){
   GUITAR.forEach(m => {
     const d = document.createElement("div");
     d.className = "str";
-    d.textContent = NAMES[S.names][m % 12];
+    d.textContent = noteName(spell(m));
     el.appendChild(d);
   });
   el.classList.toggle("show", S.inst === "guitar");
@@ -397,7 +509,15 @@ $("aUp").addEventListener("click", () => { S.aRef = Math.min(466, S.aRef + 1); r
 renderA();
 segment($("transSeg"), S.trans, v => { S.trans = +v; store.set("trans", S.trans); });
 segment($("namesSeg"), S.names, v => { S.names = v; store.set("names", v); renderStrings(); });
-segment($("instSeg"), S.inst, v => { S.inst = v; store.set("inst", v); history = []; renderStrings(); clearPitch(); });
+let pickClef;
+segment($("instSeg"), S.inst, v => {
+  S.inst = v; store.set("inst", v); history = [];
+  if(v === "guitar") pickClef("treble"); else if(v === "trombone" && S.clef === "treble") pickClef("bass");
+  renderStrings(); drawStaff(); clearPitch();
+});
+segment($("clefSeg"), S.clef, v => { S.clef = v; store.set("clef", v); drawStaff(); clearPitch(); });
+pickClef = v => { S.clef = v; store.set("clef", v); $("clefSeg").querySelectorAll("button").forEach(b => b.classList.toggle("sel", b.dataset.v === v)); };
+drawStaff();
 renderStrings();
 
 /* =========================================================
